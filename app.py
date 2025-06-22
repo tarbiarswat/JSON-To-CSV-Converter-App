@@ -1,113 +1,123 @@
+import os
 import json
 import csv
-import os
-import tkinter as tk
+import customtkinter as ctk
 from tkinter import filedialog, messagebox
-from tkinter import ttk
+from tqdm import tqdm
 
+# Flatten helper
 def flatten_json(y, prefix=''):
     out = {}
     if isinstance(y, dict):
-        for key, value in y.items():
-            full_key = f"{prefix}.{key}" if prefix else key
-            out.update(flatten_json(value, full_key))
+        for k, v in y.items():
+            full_key = f"{prefix}.{k}" if prefix else k
+            out.update(flatten_json(v, full_key))
     elif isinstance(y, list):
-        for i, value in enumerate(y):
+        for i, v in enumerate(y):
             full_key = f"{prefix}[{i}]"
-            out.update(flatten_json(value, full_key))
+            out.update(flatten_json(v, full_key))
     else:
         out[prefix] = y
     return out
 
-def process_file(file_path, progress, status_label):
-    try:
-        # Setup output paths
-        os.makedirs("output", exist_ok=True)
-        base_name = os.path.splitext(os.path.basename(file_path))[0]
-        json_output = os.path.join("output", f"{base_name}.json")
-        csv_output = os.path.join("output", f"{base_name}.csv")
+# Process a single file
+def process_file(filepath, limit, progress_bar, status_label):
+    base = os.path.basename(filepath)
+    name = os.path.splitext(base)[0]
+    os.makedirs("output", exist_ok=True)
+    json_out = f"output/{name}.json"
+    csv_out = f"output/{name}.csv"
 
-        # Read and parse JSON or NDJSON
-        progress['value'] = 10
-        status_label.config(text="Reading JSON...")
-        root.update_idletasks()
+    try:
+        progress_bar.set(0.1)
+        status_label.configure(text=f"Reading {base}...")
 
         data = []
-        with open(file_path, 'r', encoding='utf-8') as f:
+        with open(filepath, 'r', encoding='utf-8') as f:
             first_char = f.read(1)
             f.seek(0)
             if first_char == '[':
                 data = json.load(f)
             else:
                 for line in f:
-                    line = line.strip()
-                    if line:
+                    if line.strip():
                         try:
                             data.append(json.loads(line))
-                        except json.JSONDecodeError:
+                        except:
                             continue
 
-        top100 = data[:100]
+        top_data = data[:limit]
 
-        # Save JSON output
-        with open(json_output, 'w', encoding='utf-8') as jf:
-            json.dump(top100, jf, indent=2)
+        with open(json_out, 'w', encoding='utf-8') as jf:
+            json.dump(top_data, jf, indent=2)
 
-        progress['value'] = 50
-        status_label.config(text="Flattening JSON...")
-        root.update_idletasks()
+        progress_bar.set(0.5)
+        status_label.configure(text=f"Flattening {base}...")
 
-        # Flatten and write CSV
         flat_data = []
-        all_keys = set()
-        for item in top100:
+        keys = set()
+        for item in top_data:
             flat = flatten_json(item)
             flat_data.append(flat)
-            all_keys.update(flat.keys())
+            keys.update(flat.keys())
 
-        all_keys = sorted(all_keys)
-
-        with open(csv_output, 'w', newline='', encoding='utf-8') as cf:
-            writer = csv.DictWriter(cf, fieldnames=all_keys)
+        keys = sorted(keys)
+        with open(csv_out, 'w', newline='', encoding='utf-8') as cf:
+            writer = csv.DictWriter(cf, fieldnames=keys)
             writer.writeheader()
             writer.writerows(flat_data)
 
-        progress['value'] = 100
-        status_label.config(text="✅ Done: Files saved in /output")
-        messagebox.showinfo("Success", f"Saved:\n{json_output}\n{csv_output}")
+        progress_bar.set(1)
+        status_label.configure(text=f"✅ {base} done!")
 
     except Exception as e:
         messagebox.showerror("Error", str(e))
-        progress['value'] = 0
-        status_label.config(text="⚠️ Failed")
+        progress_bar.set(0)
+        status_label.configure(text=f"❌ Failed: {base}")
 
-def select_file():
-    file_path = filedialog.askopenfilename(
-        title="Select a JSON File",
-        filetypes=[("JSON Files", "*.json"), ("All Files", "*.*")]
-    )
-    if file_path:
-        progress['value'] = 0
-        status_label.config(text="Starting...")
-        root.update_idletasks()
-        process_file(file_path, progress, status_label)
+# GUI action
+def choose_files():
+    files = filedialog.askopenfilenames(filetypes=[("JSON Files", "*.json")])
+    if not files:
+        return
 
-# GUI setup
-root = tk.Tk()
-root.title("JSON to CSV Converter")
-root.geometry("400x200")
-root.resizable(False, False)
+    try:
+        limit = int(record_limit_var.get())
+    except:
+        messagebox.showwarning("Invalid Input", "Please select a valid record limit.")
+        return
 
-frame = ttk.Frame(root, padding=20)
-frame.pack(fill=tk.BOTH, expand=True)
+    for file in files:
+        process_file(file, limit, progress_bar, status_label)
+    messagebox.showinfo("Done", "All files processed!")
 
-ttk.Label(frame, text="JSON to CSV (First 100 records)", font=("Arial", 14)).pack(pady=10)
-ttk.Button(frame, text="Select JSON File", command=select_file).pack(pady=5)
+# ---------- GUI Setup ----------
+ctk.set_appearance_mode("dark")
+ctk.set_default_color_theme("blue")
 
-progress = ttk.Progressbar(frame, orient=tk.HORIZONTAL, length=300, mode='determinate')
-progress.pack(pady=10)
+app = ctk.CTk()
+app.geometry("480x360")
+app.title("🧩 JSON Truncator & CSV Converter")
 
-status_label = ttk.Label(frame, text="No file selected.")
+title = ctk.CTkLabel(app, text="📂 JSON → CSV Converter", font=ctk.CTkFont(size=20, weight="bold"))
+title.pack(pady=15)
+
+record_limit_var = ctk.StringVar(value="100")
+dropdown = ctk.CTkOptionMenu(app, values=["10", "50", "100", "500", "1000"], variable=record_limit_var)
+dropdown.pack(pady=10)
+ctk.CTkLabel(app, text="Select max records").pack()
+
+button = ctk.CTkButton(app, text="Select JSON Files", command=choose_files)
+button.pack(pady=20)
+
+progress_bar = ctk.CTkProgressBar(app, width=300)
+progress_bar.set(0)
+progress_bar.pack(pady=10)
+
+status_label = ctk.CTkLabel(app, text="Waiting for file...", text_color="#AAAAAA")
 status_label.pack(pady=5)
 
-root.mainloop()
+footer = ctk.CTkLabel(app, text="Developed with 💙 by Md Tarbiar Swat", font=ctk.CTkFont(size=12))
+footer.pack(side="bottom", pady=8)
+
+app.mainloop()
